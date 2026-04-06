@@ -26,25 +26,29 @@ func (proxy *DNSProxy) GetResponse(requestMsg *dns.Msg) (*dns.Msg, error) {
 		upstreams := proxy.getForwarder(question.Name)
 		dnsServer := upstreams[0]
 
-		switch question.Qtype {
-		case dns.TypeA:
-			if proxy.cfg.StrictIPv6 {
-				answer, err = proxy.processTypeA(dnsServer, &question, requestMsg)
-			} else {
+		if proxy.cfg.Translation.IsIgnored(question.Name) {
+			answer, err = proxy.processOtherTypes(dnsServer, &question, requestMsg)
+		} else {
+			switch question.Qtype {
+			case dns.TypeA:
+				if proxy.cfg.StrictIPv6 {
+					answer, err = proxy.processTypeA(dnsServer, &question, requestMsg)
+				} else {
+					answer, err = proxy.processOtherTypes(dnsServer, &question, requestMsg)
+				}
+
+			case dns.TypeAAAA:
+				answer, err = proxy.processTypeAAAA(dnsServer, &question, requestMsg)
+
+			case dns.TypePTR:
+				answer, err = proxy.processTypePTR(dnsServer, &question, requestMsg)
+
+			case dns.TypeANY:
+				answer, err = proxy.processTypeANY(dnsServer, &question, requestMsg)
+
+			default:
 				answer, err = proxy.processOtherTypes(dnsServer, &question, requestMsg)
 			}
-
-		case dns.TypeAAAA:
-			answer, err = proxy.processTypeAAAA(dnsServer, &question, requestMsg)
-
-		case dns.TypePTR:
-			answer, err = proxy.processTypePTR(dnsServer, &question, requestMsg)
-
-		case dns.TypeANY:
-			answer, err = proxy.processTypeANY(dnsServer, &question, requestMsg)
-
-		default:
-			answer, err = proxy.processOtherTypes(dnsServer, &question, requestMsg)
 		}
 	}
 
@@ -188,6 +192,7 @@ func (proxy *DNSProxy) processTypeA(dnsServer string, q *dns.Question, requestMs
 
 func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, requestMsg *dns.Msg) (msg *dns.Msg, err error) {
 	msg = new(dns.Msg)
+
 	cacheAnswer, found := proxy.cache.Get(q.Name)
 
 	// Have cache record?

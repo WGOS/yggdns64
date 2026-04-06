@@ -12,12 +12,16 @@ translation:
     - prefix: "300:6553:5::"
       domains:
         - "google.com."
+  # There will be no translation for these zones, A records will be also included if present
+  ignore:
+    - "home.arpa."
+    - "internal."
 
 # Describe forwarders on per-zone basis
 forwarders:
   default:
-    - 8.8.8.8:53
-    - 1.1.1.1:53
+    - "[300:baba:cafa::8.8.8.8]:53"
+    - "[300:baba:cafa::1.1.1.1]:53"
   zones:
     - name: "com."
       upstreams:

@@ -34,9 +34,11 @@ type TranslationEntry struct {
 type Translation struct {
 	Default  string              `yaml:"default"`
 	Prefixes []TranslationPrefix `yaml:"prefixes"`
+	Ignore   []string            `yaml:"ignore"`
 
-	DefaultIP net.IP
-	Entries   []TranslationEntry
+	DefaultIP      net.IP
+	Entries        []TranslationEntry
+	IgnoredDomains []string
 }
 
 type ForwarderZone struct {
@@ -95,6 +97,16 @@ func (t *Translation) GetPrefix(domain string) net.IP {
 	return t.DefaultIP
 }
 
+func (t *Translation) IsIgnored(domain string) bool {
+	domainLower := strings.ToLower(domain)
+	for _, d := range t.IgnoredDomains {
+		if strings.HasSuffix(domainLower, d) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *Translation) Normalize() error {
 	t.DefaultIP = net.ParseIP(t.Default)
 	if t.DefaultIP == nil {
@@ -119,6 +131,16 @@ func (t *Translation) Normalize() error {
 	sort.Slice(t.Entries, func(i, j int) bool {
 		return len(t.Entries[i].Domain) > len(t.Entries[j].Domain)
 	})
+
+	t.IgnoredDomains = nil
+	for _, domain := range t.Ignore {
+		d := strings.ToLower(domain)
+		if !strings.HasSuffix(d, ".") {
+			d += "."
+		}
+		t.IgnoredDomains = append(t.IgnoredDomains, d)
+	}
+
 	return nil
 }
 
