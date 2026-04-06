@@ -1,6 +1,7 @@
 # Listen address
 listen: "127.0.53.53:53"
 
+# Describe prefix translation rules on per-zone basis
 translation:
   default: "300:dada:feda:f443:ff::"
   prefixes:
@@ -12,6 +13,7 @@ translation:
       domains:
         - "google.com."
 
+# Describe forwarders on per-zone basis
 forwarders:
   default:
     - 8.8.8.8:53
