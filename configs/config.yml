@@ -1,8 +1,26 @@
 # Listen address
-listen: "[303:c771:1561:ed81::1]:53"
+listen: "127.0.53.53:53"
 
-# Local prefix for translations
-prefix: "300:dada:feda:f443:ff::"
+translation:
+  default: "300:dada:feda:f443:ff::"
+  prefixes:
+    - prefix: "300:baba:cafa::"
+      domains:
+        - "com."
+        - "net."
+    - prefix: "300:6553:5::"
+      domains:
+        - "google.com."
+
+forwarders:
+  default:
+    - 8.8.8.8:53
+    - 1.1.1.1:53
+  zones:
+    - name: "com."
+      upstreams:
+        - 8.8.8.8:53
+        - 1.1.1.1:53
 
 # Prefix of mesh-net. 200::/7 (yggdrasil) by default
 mesh-prefix: "200::/7"
@@ -20,14 +38,6 @@ allow-fallback-aaaa: no
 #   "process" - 0.0.0.0 translate to [::]. [::] return "as-is"
 #   "discard" - discard this address
 invalid-address: ignore
-
-# Forwarders
-forwarders:
-  ".ygg": 192.168.2.161:53
-  ".ufm": 192.168.2.1:53
-
-# Default DNS forwarder
-default: 8.8.8.8:53
 
 # Static addresses
 static:

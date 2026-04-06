@@ -11,15 +11,8 @@ import (
 )
 
 type DNSProxy struct {
-	Cache          *Cache
-	static         map[string]string
-	forwarders     map[string]string
-	defaultForward string
-	prefix         net.IP
-	strictIPv6     bool
-	ia             config.InvalidAddress
-	FallBack       bool
-	yggnet         *net.IPNet
+	cache *Cache
+	cfg   config.Config
 }
 
 func (proxy *DNSProxy) GetResponse(requestMsg *dns.Msg) (*dns.Msg, error) {
@@ -30,11 +23,12 @@ func (proxy *DNSProxy) GetResponse(requestMsg *dns.Msg) (*dns.Msg, error) {
 	if len(requestMsg.Question) > 0 {
 		question := requestMsg.Question[0]
 
-		dnsServer := proxy.getForwarder(question.Name)
+		upstreams := proxy.getForwarder(question.Name)
+		dnsServer := upstreams[0]
 
 		switch question.Qtype {
 		case dns.TypeA:
-			if proxy.strictIPv6 {
+			if proxy.cfg.StrictIPv6 {
 				answer, err = proxy.processTypeA(dnsServer, &question, requestMsg)
 			} else {
 				answer, err = proxy.processOtherTypes(dnsServer, &question, requestMsg)
@@ -101,7 +95,7 @@ func (proxy *DNSProxy) processAnswerArray(q []dns.RR) (answer []dns.RR) {
 		switch rr := orr.(type) {
 		case *dns.AAAA:
 			if rr.AAAA.IsUnspecified() {
-				switch proxy.ia {
+				switch proxy.cfg.IA {
 				case config.DiscardInvalidAddress: // drop
 					continue
 				case config.IgnoreInvalidAddress: // also drop
@@ -111,28 +105,28 @@ func (proxy *DNSProxy) processAnswerArray(q []dns.RR) (answer []dns.RR) {
 				}
 			} else {
 				// if answer contains ygg address - return it
-				if proxy.yggnet.Contains(rr.AAAA) {
+				if proxy.cfg.MeshPrefix.Contains(rr.AAAA) {
 					answer = append(answer, rr)
 				}
 			}
 		case *dns.A:
 			if rr.A.IsUnspecified() {
-				switch proxy.ia {
+				switch proxy.cfg.IA {
 				case config.DiscardInvalidAddress: // drop
 					continue
 				case config.IgnoreInvalidAddress: // return "as-is"
 				case config.ProcessInvalidAddress: // return "[::]"
 					nrr, _ := dns.NewRR(rr.Hdr.Name + " IN AAAA ::")
 					answer = append(answer, nrr)
-					if !proxy.strictIPv6 {
+					if !proxy.cfg.StrictIPv6 {
 						answer = append(answer, rr)
 					}
 					continue
 				}
 			}
-			nrr, _ := dns.NewRR(rr.Hdr.Name + " IN AAAA " + proxy.MakeFakeIP(rr.A))
+			nrr, _ := dns.NewRR(rr.Hdr.Name + " IN AAAA " + proxy.MakeFakeIP(rr.Hdr.Name, rr.A))
 			answer = append(answer, nrr)
-			if !proxy.strictIPv6 {
+			if !proxy.cfg.StrictIPv6 {
 				answer = append(answer, rr)
 			}
 		default:
@@ -194,7 +188,7 @@ func (proxy *DNSProxy) processTypeA(dnsServer string, q *dns.Question, requestMs
 
 func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, requestMsg *dns.Msg) (msg *dns.Msg, err error) {
 	msg = new(dns.Msg)
-	cacheAnswer, found := proxy.Cache.Get(q.Name)
+	cacheAnswer, found := proxy.cache.Get(q.Name)
 
 	// Have cache record?
 
@@ -207,12 +201,12 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 		if ip != "" {
 			requestMsg.CopyTo(msg)
 			answer := make([]dns.RR, 0)
-			rr, _ := dns.NewRR(q.Name + " IN AAAA " + proxy.MakeFakeIP(net.ParseIP(ip)))
+			rr, _ := dns.NewRR(q.Name + " IN AAAA " + proxy.MakeFakeIP(q.Name, net.ParseIP(ip)))
 			answer = append(answer, rr)
 			msg.Answer = answer
 			msg.Question[0].Qtype = dns.TypeAAAA
 			msg.MsgHdr.Response = true
-			proxy.Cache.Set(q.Name, answer, 0)
+			proxy.cache.Set(q.Name, answer, 0)
 			return msg, nil
 		}
 
@@ -234,7 +228,7 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 		for _, orr := range msg.Answer {
 			a, okA := orr.(*dns.AAAA)
 			if okA {
-				if proxy.yggnet.Contains(a.AAAA) {
+				if proxy.cfg.MeshPrefix.Contains(a.AAAA) {
 					answer = append(answer, orr)
 				}
 				answerv6 = append(answerv6, orr)
@@ -244,7 +238,7 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 		if len(answer) != 0 {
 			msg.Answer = answer
 			msg.MsgHdr.Response = true
-			proxy.Cache.Set(q.Name, answer, 0)
+			proxy.cache.Set(q.Name, answer, 0)
 			return msg, nil
 		}
 
@@ -267,7 +261,7 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 			a, okA := orr.(*dns.A)
 			if okA {
 				if a.A.IsUnspecified() {
-					switch proxy.ia {
+					switch proxy.cfg.IA {
 					case config.DiscardInvalidAddress: // drop
 						continue
 					case config.IgnoreInvalidAddress: // return "as-is"
@@ -277,7 +271,7 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 						continue
 					}
 				}
-				rr, _ := dns.NewRR(q.Name + " IN AAAA " + proxy.MakeFakeIP(a.A))
+				rr, _ := dns.NewRR(q.Name + " IN AAAA " + proxy.MakeFakeIP(q.Name, a.A))
 				answer = append(answer, rr)
 			}
 		}
@@ -285,11 +279,11 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 		msg.Question[0].Qtype = dns.TypeAAAA
 
 		if len(answer) > 0 {
-			proxy.Cache.Set(q.Name, answer, 0)
-		} else if proxy.FallBack && len(answerv6) > 0 {
+			proxy.cache.Set(q.Name, answer, 0)
+		} else if proxy.cfg.FallBack && len(answerv6) > 0 {
 			msg.Answer = answerv6
 			//			msg.MsgHdr.Response = true
-			proxy.Cache.Set(q.Name, answerv6, 0)
+			proxy.cache.Set(q.Name, answerv6, 0)
 		}
 		return msg, nil
 	} else {
@@ -304,18 +298,19 @@ func (proxy *DNSProxy) processTypeAAAA(dnsServer string, q *dns.Question, reques
 	}
 }
 
-func (dnsProxy *DNSProxy) getForwarder(domain string) string {
-	for k, v := range dnsProxy.forwarders {
-		if strings.HasSuffix(strings.ToLower(domain), strings.ToLower(k+".")) {
-			return v
+func (dnsProxy *DNSProxy) getForwarder(domain string) []string {
+	domainLower := strings.ToLower(domain)
+	for _, zone := range dnsProxy.cfg.Forwarders.Zones {
+		if strings.HasSuffix(domainLower, zone.Name) {
+			return zone.Upstreams
 		}
 	}
-	return dnsProxy.defaultForward
+	return dnsProxy.cfg.Forwarders.Default
 }
 
 func (dnsProxy *DNSProxy) getStatic(domain string) string {
-	for k, v := range dnsProxy.static {
-		if strings.ToLower(k+".") == strings.ToLower(domain) {
+	for k, v := range dnsProxy.cfg.Static {
+		if strings.EqualFold(k+".", domain) {
 			return v
 		}
 	}
@@ -346,8 +341,11 @@ func lookup(server string, m *dns.Msg) (*dns.Msg, error) {
 	return response, nil
 }
 
-func (proxy *DNSProxy) MakeFakeIP(r net.IP) string {
-	ip := proxy.prefix
+func (proxy *DNSProxy) MakeFakeIP(domain string, r net.IP) string {
+	prefix := proxy.cfg.Translation.GetPrefix(domain)
+	ip := make(net.IP, len(prefix))
+	copy(ip, prefix)
+
 	if len(r) == net.IPv6len {
 		ip[15] = r[15]
 		ip[14] = r[14]
@@ -359,6 +357,7 @@ func (proxy *DNSProxy) MakeFakeIP(r net.IP) string {
 		ip[13] = r[1]
 		ip[12] = r[0]
 	}
+
 	return ip.String()
 }
 
@@ -406,8 +405,9 @@ func (proxy *DNSProxy) ReversePTR(ptr string) (ipv4 net.IP, err error) {
 	if len(ip) != net.IPv6len {
 		err = fmt.Errorf("PTR is not IPv6")
 	}
+	defaultPrefix := proxy.cfg.Translation.DefaultIP
 	for i := 0; i < 12; i++ {
-		if ip[i] != proxy.prefix[i] {
+		if ip[i] != defaultPrefix[i] {
 			err = fmt.Errorf("PTR doesn't have our prefix")
 			return
 		}
@@ -420,16 +420,9 @@ func (proxy *DNSProxy) ReversePTR(ptr string) (ipv4 net.IP, err error) {
 	return
 }
 
-func NewProxy(cache *Cache, static, forwarders map[string]string, defaultForward string, prefix net.IP, strictIPv6 bool, ia config.InvalidAddress, fallback bool, yggnet *net.IPNet) *DNSProxy {
+func NewProxy(cfg config.Config) *DNSProxy {
 	return &DNSProxy{
-		Cache:          cache,
-		static:         static,
-		forwarders:     forwarders,
-		defaultForward: defaultForward,
-		prefix:         prefix,
-		strictIPv6:     strictIPv6,
-		ia:             ia,
-		FallBack:       fallback,
-		yggnet:         yggnet,
+		cfg:   cfg,
+		cache: NewCache(cfg.Cache.ExpTime, cfg.Cache.PurgeTime),
 	}
 }

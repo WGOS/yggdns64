@@ -4,8 +4,6 @@ package main
 
 import (
 	"log"
-	"net"
-	"time"
 
 	"github.com/WGOS/yggdns64/internal/config"
 	"github.com/WGOS/yggdns64/internal/logger"
@@ -19,24 +17,7 @@ func main() {
 		log.Fatalf("Failed to load configs: %s", err)
 	}
 
-	prefix := net.ParseIP(cfg.Prefix)
-	if len(prefix) != net.IPv6len || prefix.IsUnspecified() {
-		log.Fatalf("Wrong prefix format: %s", cfg.Prefix)
-	}
-
-	_, yggnet, _ := net.ParseCIDR(cfg.MeshPrefix)
-
-	dnsProxy := proxy.NewProxy(
-		proxy.New(cfg.Cache.ExpTime*time.Minute, cfg.Cache.PurgeTime*time.Minute),
-		cfg.Static,
-		cfg.Forwarders,
-		cfg.Default,
-		prefix,
-		cfg.StrictIPv6,
-		cfg.IA,
-		cfg.FallBack,
-		yggnet,
-	)
+	dnsProxy := proxy.NewProxy(cfg)
 
 	logger := logger.NewLogger(cfg.LogLevel)
 
