@@ -11,3 +11,10 @@ Features added compared to the original [ufm/yggdns64](https://github.com/ufm/yg
 - Docker builds
 - Binary builds
 - More flexible configuration for forwarders and prefix translation
+
+### TODOs
+- [x] Add pipeline for docker builds
+- [x] Add pipeline for binary builds
+- [x] Config rework
+- [ ] Support TCP
+- [ ] Forward query to multiple upstreams

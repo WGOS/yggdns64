@@ -23,6 +23,7 @@ func (proxy *DNSProxy) GetResponse(requestMsg *dns.Msg) (*dns.Msg, error) {
 	if len(requestMsg.Question) > 0 {
 		question := requestMsg.Question[0]
 
+		// todo: make it forward to all upstreams
 		upstreams := proxy.getForwarder(question.Name)
 		dnsServer := upstreams[0]
 
