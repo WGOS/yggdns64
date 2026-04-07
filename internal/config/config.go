@@ -227,5 +227,8 @@ func parseFile(filePath string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.Cache.ExpTime *= time.Minute
+	cfg.Cache.PurgeTime *= time.Minute
+
 	return cfg, nil
 }
